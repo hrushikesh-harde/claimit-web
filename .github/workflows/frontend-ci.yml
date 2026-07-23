@@ -52,13 +52,11 @@ jobs:
               docker logs "$CONTAINER_NAME" || true
               exit 1
             fi
-
             if [ "$i" -eq 30 ]; then
               echo "Frontend did not become ready in time"
               docker logs "$CONTAINER_NAME" || true
               exit 1
             fi
-
             sleep 2
           done
 
@@ -68,68 +66,11 @@ jobs:
           curl -fsS "http://127.0.0.1:$HOST_PORT/" >/dev/null
           curl -fsS "http://127.0.0.1:$HOST_PORT/login" >/dev/null
 
-      # TEMPORARY DEBUG STEP
-      # Reads the ACTUAL OIDC token issued by GitHub.
-      - name: Inspect actual GitHub OIDC claims
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "Requesting GitHub OIDC token..."
-
-          RESPONSE=$(curl -sS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
-
-          TOKEN=$(echo "$RESPONSE" | jq -r '.value')
-
-          if [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ]; then
-            echo "Failed to obtain GitHub OIDC token"
-            echo "$RESPONSE"
-            exit 1
-          fi
-
-          PAYLOAD=$(echo "$TOKEN" | cut -d '.' -f2)
-
-          # Convert JWT base64url encoding to standard base64
-          PAYLOAD=$(echo "$PAYLOAD" | tr '_-' '/+')
-
-          # Add required base64 padding
-          case $((${#PAYLOAD} % 4)) in
-            2) PAYLOAD="${PAYLOAD}==" ;;
-            3) PAYLOAD="${PAYLOAD}=" ;;
-          esac
-
-          echo ""
-          echo "========== ACTUAL GITHUB OIDC CLAIMS =========="
-
-          echo "$PAYLOAD" | base64 -d | jq '{
-            iss,
-            aud,
-            sub,
-            repository,
-            repository_owner,
-            ref,
-            workflow,
-            job_workflow_ref,
-            event_name
-          }'
-
-          echo "================================================"
-
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
-          role-session-name: claimit-frontend-${{ github.run_id }}
-
-      # TEMPORARY DEBUG STEP
-      # This will only run if OIDC authentication succeeds.
-      - name: Verify AWS identity
-        run: |
-          echo "AWS OIDC authentication succeeded"
-          aws sts get-caller-identity
 
       - name: Login to Amazon ECR
         id: ecr-login
@@ -141,10 +82,8 @@ jobs:
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
         run: |
           set -euo pipefail
-
           IMAGE_TAG="sha-${GITHUB_SHA::7}"
           ECR_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-
           docker tag "$IMAGE_NAME" "$ECR_IMAGE"
           docker push "$ECR_IMAGE"
 
@@ -153,7 +92,6 @@ jobs:
         run: |
           echo "Container status:"
           docker ps -a --filter "name=^/${CONTAINER_NAME}$" || true
-
           echo "Container logs:"
           docker logs "$CONTAINER_NAME" || true
 
