@@ -69,27 +69,53 @@ jobs:
           curl -fsS "http://127.0.0.1:$HOST_PORT/login" >/dev/null
 
       # TEMPORARY DEBUG STEP
-      - name: Debug GitHub OIDC context
+      # Reads the ACTUAL OIDC token issued by GitHub.
+      - name: Inspect actual GitHub OIDC claims
+        shell: bash
         run: |
-          echo "======================================"
-          echo "GitHub OIDC Debug Information"
-          echo "======================================"
+          set -euo pipefail
 
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Repository owner: $GITHUB_REPOSITORY_OWNER"
-          echo "Ref: $GITHUB_REF"
-          echo "Ref name: $GITHUB_REF_NAME"
-          echo "Event: $GITHUB_EVENT_NAME"
+          echo "Requesting GitHub OIDC token..."
+
+          RESPONSE=$(curl -sS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
+
+          TOKEN=$(echo "$RESPONSE" | jq -r '.value')
+
+          if [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ]; then
+            echo "Failed to obtain GitHub OIDC token"
+            echo "$RESPONSE"
+            exit 1
+          fi
+
+          PAYLOAD=$(echo "$TOKEN" | cut -d '.' -f2)
+
+          # Convert JWT base64url encoding to standard base64
+          PAYLOAD=$(echo "$PAYLOAD" | tr '_-' '/+')
+
+          # Add required base64 padding
+          case $((${#PAYLOAD} % 4)) in
+            2) PAYLOAD="${PAYLOAD}==" ;;
+            3) PAYLOAD="${PAYLOAD}=" ;;
+          esac
 
           echo ""
-          echo "Expected OIDC subject:"
-          echo "repo:${GITHUB_REPOSITORY}:ref:${GITHUB_REF}"
+          echo "========== ACTUAL GITHUB OIDC CLAIMS =========="
 
-          echo ""
-          echo "Expected audience:"
-          echo "sts.amazonaws.com"
+          echo "$PAYLOAD" | base64 -d | jq '{
+            iss,
+            aud,
+            sub,
+            repository,
+            repository_owner,
+            ref,
+            workflow,
+            job_workflow_ref,
+            event_name
+          }'
 
-          echo "======================================"
+          echo "================================================"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
