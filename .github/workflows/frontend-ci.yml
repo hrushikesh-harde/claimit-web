@@ -52,11 +52,13 @@ jobs:
               docker logs "$CONTAINER_NAME" || true
               exit 1
             fi
+
             if [ "$i" -eq 30 ]; then
               echo "Frontend did not become ready in time"
               docker logs "$CONTAINER_NAME" || true
               exit 1
             fi
+
             sleep 2
           done
 
@@ -66,11 +68,42 @@ jobs:
           curl -fsS "http://127.0.0.1:$HOST_PORT/" >/dev/null
           curl -fsS "http://127.0.0.1:$HOST_PORT/login" >/dev/null
 
+      # TEMPORARY DEBUG STEP
+      - name: Debug GitHub OIDC context
+        run: |
+          echo "======================================"
+          echo "GitHub OIDC Debug Information"
+          echo "======================================"
+
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Repository owner: $GITHUB_REPOSITORY_OWNER"
+          echo "Ref: $GITHUB_REF"
+          echo "Ref name: $GITHUB_REF_NAME"
+          echo "Event: $GITHUB_EVENT_NAME"
+
+          echo ""
+          echo "Expected OIDC subject:"
+          echo "repo:${GITHUB_REPOSITORY}:ref:${GITHUB_REF}"
+
+          echo ""
+          echo "Expected audience:"
+          echo "sts.amazonaws.com"
+
+          echo "======================================"
+
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: claimit-frontend-${{ github.run_id }}
+
+      # TEMPORARY DEBUG STEP
+      # This will only run if OIDC authentication succeeds.
+      - name: Verify AWS identity
+        run: |
+          echo "AWS OIDC authentication succeeded"
+          aws sts get-caller-identity
 
       - name: Login to Amazon ECR
         id: ecr-login
@@ -82,8 +115,10 @@ jobs:
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
         run: |
           set -euo pipefail
+
           IMAGE_TAG="sha-${GITHUB_SHA::7}"
           ECR_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
           docker tag "$IMAGE_NAME" "$ECR_IMAGE"
           docker push "$ECR_IMAGE"
 
@@ -92,6 +127,7 @@ jobs:
         run: |
           echo "Container status:"
           docker ps -a --filter "name=^/${CONTAINER_NAME}$" || true
+
           echo "Container logs:"
           docker logs "$CONTAINER_NAME" || true
 
